@@ -79,4 +79,41 @@ class BookingSerializer(serializers.ModelSerializer):
             if overlapping_bookings.exists():
                 raise serializers.ValidationError("The resource is already booked for this time frame.")
 
+        if instance:
+            old_status = instance.status
+            if old_status != status:
+                allowed = {
+                    'PENDING': ['APPROVED', 'REJECTED'],
+                    'APPROVED': ['COMPLETED', 'CANCELLED'],
+                }
+                allowed_targets = allowed.get(old_status, [])
+                if status not in allowed_targets:
+                    raise serializers.ValidationError(
+                        {"status": f"Invalid status transition from {old_status} to {status}."}
+                    )
+                
+                request = self.context.get('request')
+                if request and hasattr(request, 'user'):
+                    user = request.user
+                    is_borrower = (user == instance.borrower)
+                    is_owner = (instance.resource.owner_user == user)
+                    is_admin = (user.is_staff or user.is_superuser)
+
+                    if is_borrower:
+                        if status != 'CANCELLED':
+                            raise serializers.ValidationError(
+                                {"status": "Borrowers can only transition their bookings to CANCELLED."}
+                            )
+                    elif is_owner or is_admin:
+                        pass
+                    else:
+                        raise serializers.ValidationError(
+                            {"status": "You do not have permission to change the status of this booking."}
+                        )
+        else:
+            if status != 'PENDING':
+                raise serializers.ValidationError(
+                    {"status": "Initial status must be PENDING."}
+                )
+
         return data

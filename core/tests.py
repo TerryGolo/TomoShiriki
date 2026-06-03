@@ -152,3 +152,236 @@ class BookingSerializerTest(TestCase):
         serializer = BookingSerializer(data=data)
         self.assertFalse(serializer.is_valid())
         self.assertIn('non_field_errors', serializer.errors)
+
+
+from rest_framework.test import APIRequestFactory
+from core.signals import booking_created, booking_status_changed
+
+class BookingWorkflowTest(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', password='password')
+        self.borrower = User.objects.create_user(username='borrower', password='password')
+        self.resource = Resource.objects.create(name='Resource', owner_user=self.owner)
+        self.now = timezone.now()
+
+    def test_valid_transitions(self):
+        # PENDING -> APPROVED
+        booking = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now,
+            end_time=self.now + timedelta(hours=1),
+            status='PENDING'
+        )
+        booking.status = 'APPROVED'
+        booking.save()
+        self.assertEqual(booking.status, 'APPROVED')
+
+        # APPROVED -> COMPLETED
+        booking.status = 'COMPLETED'
+        booking.save()
+        self.assertEqual(booking.status, 'COMPLETED')
+
+        # Create another booking for PENDING -> REJECTED
+        booking2 = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now + timedelta(hours=2),
+            end_time=self.now + timedelta(hours=3),
+            status='PENDING'
+        )
+        booking2.status = 'REJECTED'
+        booking2.save()
+        self.assertEqual(booking2.status, 'REJECTED')
+
+        # Create another for APPROVED -> CANCELLED
+        booking3 = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now + timedelta(hours=4),
+            end_time=self.now + timedelta(hours=5),
+            status='PENDING'
+        )
+        booking3.status = 'APPROVED'
+        booking3.save()
+        booking3.status = 'CANCELLED'
+        booking3.save()
+        self.assertEqual(booking3.status, 'CANCELLED')
+
+    def test_invalid_transitions(self):
+        # PENDING -> COMPLETED (invalid)
+        booking = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now,
+            end_time=self.now + timedelta(hours=1),
+            status='PENDING'
+        )
+        booking.status = 'COMPLETED'
+        with self.assertRaises(ValidationError):
+            booking.save()
+
+        # REJECTED is terminal
+        booking2 = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now + timedelta(hours=2),
+            end_time=self.now + timedelta(hours=3),
+            status='PENDING'
+        )
+        booking2.status = 'REJECTED'
+        booking2.save()
+        booking2.status = 'APPROVED'
+        with self.assertRaises(ValidationError):
+            booking2.save()
+
+
+class BookingSerializerPermissionTest(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', password='password')
+        self.borrower = User.objects.create_user(username='borrower', password='password')
+        self.other_user = User.objects.create_user(username='other', password='password')
+        self.admin_user = User.objects.create_user(username='admin', password='password', is_staff=True)
+        self.resource = Resource.objects.create(name='Resource', owner_user=self.owner)
+        self.now = timezone.now()
+        self.factory = APIRequestFactory()
+
+    def test_serializer_create_must_be_pending(self):
+        # Try to create an APPROVED booking via serializer
+        data = {
+            'resource': self.resource.id,
+            'borrower': self.borrower.id,
+            'start_time': self.now,
+            'end_time': self.now + timedelta(hours=1),
+            'status': 'APPROVED'
+        }
+        serializer = BookingSerializer(data=data)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('status', serializer.errors)
+
+    def test_borrower_can_only_cancel(self):
+        # Start with an APPROVED booking
+        booking = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now,
+            end_time=self.now + timedelta(hours=1),
+            status='PENDING'
+        )
+        booking.status = 'APPROVED'
+        booking.save()
+
+        # Borrower wants to transition APPROVED -> CANCELLED (allowed)
+        request = self.factory.patch('/')
+        request.user = self.borrower
+        serializer = BookingSerializer(
+            instance=booking, 
+            data={'status': 'CANCELLED'}, 
+            partial=True, 
+            context={'request': request}
+        )
+        self.assertTrue(serializer.is_valid())
+
+        # Borrower wants to transition APPROVED -> COMPLETED (not allowed)
+        serializer2 = BookingSerializer(
+            instance=booking,
+            data={'status': 'COMPLETED'},
+            partial=True,
+            context={'request': request}
+        )
+        self.assertFalse(serializer2.is_valid())
+        self.assertIn('status', serializer2.errors)
+
+    def test_owner_and_admin_permissions(self):
+        # Start with PENDING booking
+        booking = Booking.objects.create(
+            resource=self.resource,
+            borrower=self.borrower,
+            start_time=self.now,
+            end_time=self.now + timedelta(hours=1),
+            status='PENDING'
+        )
+
+        # Owner wants to transition PENDING -> APPROVED (allowed)
+        request = self.factory.patch('/')
+        request.user = self.owner
+        serializer = BookingSerializer(
+            instance=booking,
+            data={'status': 'APPROVED'},
+            partial=True,
+            context={'request': request}
+        )
+        self.assertTrue(serializer.is_valid())
+
+        # Admin wants to transition PENDING -> APPROVED (allowed)
+        request_admin = self.factory.patch('/')
+        request_admin.user = self.admin_user
+        serializer_admin = BookingSerializer(
+            instance=booking,
+            data={'status': 'APPROVED'},
+            partial=True,
+            context={'request': request_admin}
+        )
+        self.assertTrue(serializer_admin.is_valid())
+
+        # Other user wants to transition PENDING -> APPROVED (not allowed)
+        request_other = self.factory.patch('/')
+        request_other.user = self.other_user
+        serializer_other = BookingSerializer(
+            instance=booking,
+            data={'status': 'APPROVED'},
+            partial=True,
+            context={'request': request_other}
+        )
+        self.assertFalse(serializer_other.is_valid())
+        self.assertIn('status', serializer_other.errors)
+
+
+class BookingSignalsTest(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', password='password')
+        self.borrower = User.objects.create_user(username='borrower', password='password')
+        self.resource = Resource.objects.create(name='Resource', owner_user=self.owner)
+        self.now = timezone.now()
+        self.created_calls = []
+        self.status_changed_calls = []
+
+    def handle_created(self, sender, instance, **kwargs):
+        self.created_calls.append((sender, instance))
+
+    def handle_status_changed(self, sender, instance, old_status, new_status, **kwargs):
+        self.status_changed_calls.append((sender, instance, old_status, new_status))
+
+    def test_signals_fired(self):
+        # Connect signals
+        booking_created.connect(self.handle_created)
+        booking_status_changed.connect(self.handle_status_changed)
+
+        try:
+            # Create a booking -> should trigger booking_created
+            booking = Booking.objects.create(
+                resource=self.resource,
+                borrower=self.borrower,
+                start_time=self.now,
+                end_time=self.now + timedelta(hours=1),
+                status='PENDING'
+            )
+            self.assertEqual(len(self.created_calls), 1)
+            self.assertEqual(self.created_calls[0][0], Booking)
+            self.assertEqual(self.created_calls[0][1], booking)
+            self.assertEqual(len(self.status_changed_calls), 0)
+
+            # Change status PENDING -> APPROVED -> should trigger booking_status_changed
+            booking.status = 'APPROVED'
+            booking.save()
+
+            self.assertEqual(len(self.created_calls), 1)
+            self.assertEqual(len(self.status_changed_calls), 1)
+            self.assertEqual(self.status_changed_calls[0][0], Booking)
+            self.assertEqual(self.status_changed_calls[0][1], booking)
+            self.assertEqual(self.status_changed_calls[0][2], 'PENDING')
+            self.assertEqual(self.status_changed_calls[0][3], 'APPROVED')
+        finally:
+            # Disconnect to clean up
+            booking_created.disconnect(self.handle_created)
+            booking_status_changed.disconnect(self.handle_status_changed)
