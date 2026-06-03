@@ -82,7 +82,7 @@ while ($Iteration -lt $MaxIterations) {
     if ($UseDocker) {
         # Run inside Docker with interactive pseudo-TTY (-it) to allow pasting the token if needed.
         # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring using dbus-launch.
-        $DockerCmd = "docker run -it --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev sh -c `"mkdir -p /home/vscode/.local/share/keyrings; eval \$(dbus-launch --sh-syntax); eval \$(printf '\n' | gnome-keyring-daemon --unlock); eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets); exec agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
+        $DockerCmd = "docker run -it --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev sh -c `"git config --global --add safe.directory /workspace; mkdir -p /home/vscode/.local/share/keyrings; eval \$(dbus-launch --sh-syntax); eval \$(printf '\n' | gnome-keyring-daemon --unlock); eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets); exec agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
         Invoke-Expression $DockerCmd
     } else {
         # Run agy directly on host

@@ -2,9 +2,12 @@
 # Ralph Loop Bash Script
 # Usage: ./ralph.sh [--no-docker] [max_iterations]
 
-# Parse arguments
+# Step 1: Detect if Docker is available and running
 USE_DOCKER=true
 MAX_ITERATIONS=15
+
+# Configure host git to avoid dubious ownership warnings inside WSL
+git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
 
 for arg in "$@"; do
     case $arg in
@@ -83,6 +86,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
           $GIT_CONFIG_MOUNT \
           tomoshiriki-dev \
           sh -c "
+            git config --global --add safe.directory /workspace
             mkdir -p /home/vscode/.local/share/keyrings
             eval \$(dbus-launch --sh-syntax)
             eval \$(printf '\n' | gnome-keyring-daemon --unlock)

@@ -71,5 +71,29 @@ class Booking(models.Model):
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def clean(self):
+        super().clean()
+        if self.start_time and self.end_time:
+            if self.start_time >= self.end_time:
+                raise ValidationError("Start time must be before end time.")
+            
+            if self.status in ['PENDING', 'APPROVED']:
+                overlapping_bookings = Booking.objects.filter(
+                    resource=self.resource,
+                    status__in=['PENDING', 'APPROVED']
+                ).filter(
+                    start_time__lt=self.end_time,
+                    end_time__gt=self.start_time
+                )
+                if self.pk:
+                    overlapping_bookings = overlapping_bookings.exclude(pk=self.pk)
+                
+                if overlapping_bookings.exists():
+                    raise ValidationError("The resource is already booked for this time frame.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.resource.name} booked by {self.borrower.username}"

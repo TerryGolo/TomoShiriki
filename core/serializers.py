@@ -46,3 +46,37 @@ class BookingSerializer(serializers.ModelSerializer):
         model = Booking
         fields = ['id', 'resource', 'borrower', 'start_time', 'end_time', 'status', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+    def validate(self, data):
+        instance = self.instance
+        
+        resource = data.get('resource', instance.resource if instance else None)
+        start_time = data.get('start_time', instance.start_time if instance else None)
+        end_time = data.get('end_time', instance.end_time if instance else None)
+        status = data.get('status', instance.status if instance else 'PENDING')
+
+        if not resource:
+            raise serializers.ValidationError({"resource": "This field is required."})
+        if not start_time:
+            raise serializers.ValidationError({"start_time": "This field is required."})
+        if not end_time:
+            raise serializers.ValidationError({"end_time": "This field is required."})
+
+        if start_time >= end_time:
+            raise serializers.ValidationError("Start time must be before end time.")
+
+        if status in ['PENDING', 'APPROVED']:
+            overlapping_bookings = Booking.objects.filter(
+                resource=resource,
+                status__in=['PENDING', 'APPROVED']
+            ).filter(
+                start_time__lt=end_time,
+                end_time__gt=start_time
+            )
+            if instance:
+                overlapping_bookings = overlapping_bookings.exclude(pk=instance.pk)
+
+            if overlapping_bookings.exists():
+                raise serializers.ValidationError("The resource is already booked for this time frame.")
+
+        return data
