@@ -1,13 +1,24 @@
 #!/bin/bash
 # Ralph Loop Bash Script
 # Usage: ./ralph.sh [--no-docker] [max_iterations]
+#
+# Authentication: Set ANTIGRAVITY_API_KEY in your environment before running.
+# Example: export ANTIGRAVITY_API_KEY=your_key_here && ./ralph.sh
 
-# Step 1: Detect if Docker is available and running
+# Defaults
 USE_DOCKER=true
 MAX_ITERATIONS=15
 
 # Configure host git to avoid dubious ownership warnings inside WSL
 git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+
+# Check for API key
+if [ -z "$ANTIGRAVITY_API_KEY" ]; then
+    echo -e "\e[33mWarning: ANTIGRAVITY_API_KEY is not set.\e[0m"
+    echo -e "\e[33mThe agent will prompt for interactive OAuth login on every container iteration.\e[0m"
+    echo -e "\e[33mTo fix this, run: export ANTIGRAVITY_API_KEY=your_key_here\e[0m"
+    echo ""
+fi
 
 for arg in "$@"; do
     case $arg in
@@ -45,9 +56,6 @@ if [ "$USE_DOCKER" = true ]; then
         GIT_CONFIG_MOUNT="-v $HOME/.gitconfig:/home/vscode/.gitconfig:ro"
         echo -e "Mounted host .gitconfig to container."
     fi
-
-    # Ensure local directory for persisted keyring exists
-    mkdir -p docs/.ralph_keyring
 else
     echo -e "\e[33mRunning natively on WSL/Host environment.\e[0m"
 fi
@@ -83,10 +91,10 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
             DOCKER_FLAGS="-it --rm"
         fi
 
-        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring using dbus-launch.
+        # Pass the API key into the container via -e flag, mount workspace, configure git
         docker run $DOCKER_FLAGS \
+          -e ANTIGRAVITY_API_KEY="${ANTIGRAVITY_API_KEY}" \
           -v "$(pwd):/workspace" \
-          -v "$(pwd)/docs/.ralph_keyring:/home/vscode/.local/share/keyrings" \
           -w /workspace \
           $GIT_CONFIG_MOUNT \
           tomoshiriki-dev \
@@ -96,22 +104,10 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
                 export GIT_CONFIG_GLOBAL=/tmp/.gitconfig
             fi
             git config --global --add safe.directory /workspace
-            mkdir -p /home/vscode/.local/share/keyrings
-            eval \$(dbus-launch --sh-syntax)
-            eval \$(printf '\n' | gnome-keyring-daemon --unlock)
-            eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets)
             exec agy -p --dangerously-skip-permissions \"$Prompt\"
           "
     else
-        # WSL/Linux specific check: if keyring daemon and dbus are installed, wrap agy to enable authentication persistence
-        if command -v dbus-run-session &> /dev/null && command -v gnome-keyring-daemon &> /dev/null; then
-            dbus-run-session -- sh -c "
-              echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null
-              agy -p --dangerously-skip-permissions \"$Prompt\"
-            "
-        else
-            agy -p --dangerously-skip-permissions "$Prompt"
-        fi
+        agy -p --dangerously-skip-permissions "$Prompt"
     fi
 
     # Auto-commit fallback

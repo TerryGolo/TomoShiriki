@@ -1,5 +1,8 @@
 # Ralph Loop PowerShell Script for Windows
 # Usage: .\ralph.ps1 [-MaxIterations <int>] [-NoDocker]
+#
+# Authentication: Set ANTIGRAVITY_API_KEY in your environment before running.
+# Example: $env:ANTIGRAVITY_API_KEY="your_key_here"; .\ralph.ps1
 
 param (
     [int]$MaxIterations = 15,
@@ -10,6 +13,13 @@ Write-Host "==========================================" -ForegroundColor Green
 Write-Host "       Starting TomoShiriki Ralph Loop    " -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host "Max Iterations: $MaxIterations" -ForegroundColor Gray
+
+# Check for API key
+if (-not $env:ANTIGRAVITY_API_KEY) {
+    Write-Host "Warning: ANTIGRAVITY_API_KEY is not set." -ForegroundColor Yellow
+    Write-Host "The agent will prompt for interactive OAuth login on every container iteration." -ForegroundColor Yellow
+    Write-Host 'To fix this, run: $env:ANTIGRAVITY_API_KEY="your_key_here"' -ForegroundColor Yellow
+}
 
 # Step 1: Detect if Docker is available and running
 $UseDocker = $false
@@ -36,11 +46,6 @@ if ($UseDocker) {
     if (Test-Path "$HomeDir\.gitconfig") {
         $GitConfigMount = "-v `"$HomeDir\.gitconfig:/home/vscode/.gitconfig:ro`""
         Write-Host "Mounted host .gitconfig to container." -ForegroundColor Gray
-    }
-
-    # Ensure local directory for keyring persistence exists
-    if (-not (Test-Path "docs\.ralph_keyring")) {
-        New-Item -ItemType Directory -Path "docs\.ralph_keyring" | Out-Null
     }
 } else {
     Write-Host "Running natively on Windows host environment." -ForegroundColor Yellow
@@ -80,9 +85,12 @@ while ($Iteration -lt $MaxIterations) {
     $Prompt = "Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if ($UseDocker) {
-        # Run inside Docker with interactive pseudo-TTY (-it) to allow pasting the token if needed.
-        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring using dbus-launch.
-        $DockerCmd = "docker run -it --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev sh -c `"if [ -f /home/vscode/.gitconfig ]; then cp /home/vscode/.gitconfig /tmp/.gitconfig; export GIT_CONFIG_GLOBAL=/tmp/.gitconfig; fi; git config --global --add safe.directory /workspace; mkdir -p /home/vscode/.local/share/keyrings; eval \$(dbus-launch --sh-syntax); eval \$(printf '\n' | gnome-keyring-daemon --unlock); eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets); exec agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
+        # Pass the API key into the container via -e flag, mount workspace, configure git
+        $ApiKeyArg = ""
+        if ($env:ANTIGRAVITY_API_KEY) {
+            $ApiKeyArg = "-e ANTIGRAVITY_API_KEY=$($env:ANTIGRAVITY_API_KEY)"
+        }
+        $DockerCmd = "docker run -it --rm $ApiKeyArg -v `"${PWD}:/workspace`" -w /workspace $GitConfigMount tomoshiriki-dev sh -c `"if [ -f /home/vscode/.gitconfig ]; then cp /home/vscode/.gitconfig /tmp/.gitconfig; export GIT_CONFIG_GLOBAL=/tmp/.gitconfig; fi; git config --global --add safe.directory /workspace; exec agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
         Invoke-Expression $DockerCmd
     } else {
         # Run agy directly on host
