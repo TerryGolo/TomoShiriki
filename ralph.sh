@@ -1,19 +1,18 @@
 #!/bin/bash
-# Ralph Loop Bash Script (WSL & Native Execution optimized)
-# Usage: ./ralph.sh [--docker] [max_iterations]
+# Ralph Loop Bash Script
+# Usage: ./ralph.sh [--no-docker] [max_iterations]
 
 # Parse arguments
-USE_DOCKER=false
+USE_DOCKER=true
 MAX_ITERATIONS=15
 
 for arg in "$@"; do
     case $arg in
-        --docker)
-        USE_DOCKER=true
+        --no-docker)
+        USE_DOCKER=false
         shift
         ;;
         *)
-        # If it's a number, set max_iterations
         if [[ "$arg" =~ ^[0-9]+$ ]]; then
             MAX_ITERATIONS=$arg
         fi
@@ -31,7 +30,7 @@ echo -e "Docker Sandbox: $USE_DOCKER"
 
 GIT_CONFIG_MOUNT=""
 if [ "$USE_DOCKER" = true ]; then
-    echo -e "Docker is running. Running in containerized sandbox mode."
+    echo -e "Docker Sandbox enabled. Building/verifying container image..."
     echo -e "\n\e[36mBuilding tomoshiriki-dev image...\e[0m"
     docker build -t tomoshiriki-dev -f .devcontainer/Dockerfile .
     if [ $? -ne 0 ]; then
@@ -43,6 +42,9 @@ if [ "$USE_DOCKER" = true ]; then
         GIT_CONFIG_MOUNT="-v $HOME/.gitconfig:/home/vscode/.gitconfig:ro"
         echo -e "Mounted host .gitconfig to container."
     fi
+
+    # Ensure local directory for persisted keyring exists
+    mkdir -p docs/.ralph_keyring
 else
     echo -e "\e[33mRunning natively on WSL/Host environment.\e[0m"
 fi
@@ -72,7 +74,18 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     Prompt="Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if [ "$USE_DOCKER" = true ]; then
-        docker run --rm -v "$(pwd):/workspace" -w /workspace $GIT_CONFIG_MOUNT tomoshiriki-dev agy -p --dangerously-skip-permissions "$Prompt"
+        # Run inside Docker, mounting the workspace AND the persisted keyring directory
+        # Wraps execution in dbus-run-session and starts keyring daemon inside the container
+        docker run --rm \
+          -v "$(pwd):/workspace" \
+          -v "$(pwd)/docs/.ralph_keyring:/home/vscode/.local/share/keyrings" \
+          -w /workspace \
+          $GIT_CONFIG_MOUNT \
+          tomoshiriki-dev \
+          dbus-run-session -- sh -c "
+            echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null
+            agy -p --dangerously-skip-permissions \"$Prompt\"
+          "
     else
         # WSL/Linux specific check: if keyring daemon and dbus are installed, wrap agy to enable authentication persistence
         if command -v dbus-run-session &> /dev/null && command -v gnome-keyring-daemon &> /dev/null; then

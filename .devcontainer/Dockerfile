@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/python:3.12
 
-# Install system tools
-RUN apt-get update && apt-get install -y sqlite3 git curl
+# Install system tools and keyring packages
+RUN apt-get update && apt-get install -y sqlite3 git curl dbus-x11 gnome-keyring
 
 # Copy requirements and install python packages
 COPY requirements.txt /tmp/pip-tmp/

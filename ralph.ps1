@@ -1,8 +1,9 @@
 # Ralph Loop PowerShell Script for Windows
-# Usage: .\ralph.ps1 [-MaxIterations <int>]
+# Usage: .\ralph.ps1 [-MaxIterations <int>] [-NoDocker]
 
 param (
-    [int]$MaxIterations = 15
+    [int]$MaxIterations = 15,
+    [switch]$NoDocker
 )
 
 Write-Host "==========================================" -ForegroundColor Green
@@ -12,16 +13,18 @@ Write-Host "Max Iterations: $MaxIterations" -ForegroundColor Gray
 
 # Step 1: Detect if Docker is available and running
 $UseDocker = $false
-if (Get-Command docker -ErrorAction SilentlyContinue) {
-    docker ps > $null 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $UseDocker = $true
+if (-not $NoDocker) {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker ps > $null 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $UseDocker = $true
+        }
     }
 }
 
 $GitConfigMount = ""
 if ($UseDocker) {
-    Write-Host "Docker is running. Running in containerized sandbox mode." -ForegroundColor Green
+    Write-Host "Docker Sandbox enabled. Building/verifying container image..." -ForegroundColor Green
     Write-Host "`nBuilding tomoshiriki-dev image..." -ForegroundColor Cyan
     docker build -t tomoshiriki-dev -f .devcontainer/Dockerfile .
     if ($LASTEXITCODE -ne 0) {
@@ -34,8 +37,13 @@ if ($UseDocker) {
         $GitConfigMount = "-v `"$HomeDir\.gitconfig:/home/vscode/.gitconfig:ro`""
         Write-Host "Mounted host .gitconfig to container." -ForegroundColor Gray
     }
+
+    # Ensure local directory for keyring persistence exists
+    if (-not (Test-Path "docs\.ralph_keyring")) {
+        New-Item -ItemType Directory -Path "docs\.ralph_keyring" | Out-Null
+    }
 } else {
-    Write-Host "Docker is not running/available. Falling back to native host execution." -ForegroundColor Yellow
+    Write-Host "Running natively on Windows host environment." -ForegroundColor Yellow
 }
 
 $Iteration = 0
@@ -72,8 +80,9 @@ while ($Iteration -lt $MaxIterations) {
     $Prompt = "Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if ($UseDocker) {
-        # Run agy inside the docker container
-        $DockerCmd = "docker run --rm -v `"${PWD}:/workspace`" -w /workspace $GitConfigMount tomoshiriki-dev agy -p --dangerously-skip-permissions `"$Prompt`""
+        # Run inside Docker, mounting workspace AND keyring directory
+        # Wraps execution in dbus-run-session and starts keyring daemon inside the container
+        $DockerCmd = "docker run --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev dbus-run-session -- sh -c `"echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null; agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
         Invoke-Expression $DockerCmd
     } else {
         # Run agy directly on host
