@@ -91,6 +91,10 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
           $GIT_CONFIG_MOUNT \
           tomoshiriki-dev \
           sh -c "
+            if [ -f /home/vscode/.gitconfig ]; then
+                cp /home/vscode/.gitconfig /tmp/.gitconfig
+                export GIT_CONFIG_GLOBAL=/tmp/.gitconfig
+            fi
             git config --global --add safe.directory /workspace
             mkdir -p /home/vscode/.local/share/keyrings
             eval \$(dbus-launch --sh-syntax)
