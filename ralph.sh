@@ -74,17 +74,19 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     Prompt="Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if [ "$USE_DOCKER" = true ]; then
-        # Run inside Docker, mounting the workspace AND the persisted keyring directory
-        # Wraps execution in dbus-run-session and starts keyring daemon inside the container
-        docker run --rm \
+        # Run inside Docker with interactive stdin (-i) to allow pasting the token if needed.
+        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring.
+        docker run -i --rm \
           -v "$(pwd):/workspace" \
           -v "$(pwd)/docs/.ralph_keyring:/home/vscode/.local/share/keyrings" \
           -w /workspace \
           $GIT_CONFIG_MOUNT \
           tomoshiriki-dev \
           dbus-run-session -- sh -c "
-            echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null
-            agy -p --dangerously-skip-permissions \"$Prompt\"
+            mkdir -p /home/vscode/.local/share/keyrings
+            printf '\n' | gnome-keyring-daemon --unlock &> /dev/null
+            eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets)
+            exec agy -p --dangerously-skip-permissions \"$Prompt\"
           "
     else
         # WSL/Linux specific check: if keyring daemon and dbus are installed, wrap agy to enable authentication persistence

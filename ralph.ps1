@@ -80,9 +80,9 @@ while ($Iteration -lt $MaxIterations) {
     $Prompt = "Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if ($UseDocker) {
-        # Run inside Docker, mounting workspace AND keyring directory
-        # Wraps execution in dbus-run-session and starts keyring daemon inside the container
-        $DockerCmd = "docker run --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev dbus-run-session -- sh -c `"echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null; agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
+        # Run inside Docker with interactive stdin (-i) to allow pasting the token if needed.
+        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring.
+        $DockerCmd = "docker run -i --rm -v `"${PWD}:/workspace`" -v `"${PWD}/docs/.ralph_keyring:/home/vscode/.local/share/keyrings`" -w /workspace $GitConfigMount tomoshiriki-dev dbus-run-session -- sh -c `"mkdir -p /home/vscode/.local/share/keyrings; printf '\n' | gnome-keyring-daemon --unlock &> /dev/null; eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets); exec agy -p --dangerously-skip-permissions \\`"$Prompt\\`"`""
         Invoke-Expression $DockerCmd
     } else {
         # Run agy directly on host
