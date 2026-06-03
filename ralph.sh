@@ -74,17 +74,18 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     Prompt="Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if [ "$USE_DOCKER" = true ]; then
-        # Run inside Docker with interactive stdin (-i) to allow pasting the token if needed.
-        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring.
-        docker run -i --rm \
+        # Run inside Docker with interactive pseudo-TTY (-it) to allow pasting the token if needed.
+        # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring using dbus-launch.
+        docker run -it --rm \
           -v "$(pwd):/workspace" \
           -v "$(pwd)/docs/.ralph_keyring:/home/vscode/.local/share/keyrings" \
           -w /workspace \
           $GIT_CONFIG_MOUNT \
           tomoshiriki-dev \
-          dbus-run-session -- sh -c "
+          sh -c "
             mkdir -p /home/vscode/.local/share/keyrings
-            printf '\n' | gnome-keyring-daemon --unlock &> /dev/null
+            eval \$(dbus-launch --sh-syntax)
+            eval \$(printf '\n' | gnome-keyring-daemon --unlock)
             eval \$(printf '\n' | gnome-keyring-daemon --start --components=secrets)
             exec agy -p --dangerously-skip-permissions \"$Prompt\"
           "
