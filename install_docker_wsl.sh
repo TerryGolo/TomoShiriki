@@ -10,9 +10,9 @@ echo -e "\e[32m==========================================\e[0m"
 echo "Note: This script will ask for your sudo password."
 
 # 1. Update package list and install dependencies
-echo -e "\n\e[36m1. Updating apt package index...\e[0m"
+echo -e "\n\e[36m1. Updating apt package index and installing dependencies...\e[0m"
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg lsb-release
+sudo apt-get install -y ca-certificates curl gnupg lsb-release dbus-x11 gnome-keyring
 
 # 2. Add GPG key for Docker repository
 echo -e "\n\e[36m2. Configuring Docker GPG key...\e[0m"

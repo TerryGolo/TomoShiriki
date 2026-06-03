@@ -1,23 +1,33 @@
 #!/bin/bash
-# Ralph Loop Bash Script
-# Usage: ./ralph.sh [max_iterations]
+# Ralph Loop Bash Script (WSL & Native Execution optimized)
+# Usage: ./ralph.sh [--docker] [max_iterations]
 
-MAX_ITERATIONS=${1:-15}
+# Parse arguments
+USE_DOCKER=false
+MAX_ITERATIONS=15
+
+for arg in "$@"; do
+    case $arg in
+        --docker)
+        USE_DOCKER=true
+        shift
+        ;;
+        *)
+        # If it's a number, set max_iterations
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+            MAX_ITERATIONS=$arg
+        fi
+        ;;
+    esac
+done
+
 TASKS_FILE="docs/tasks.md"
 
 echo -e "\e[32m==========================================\e[0m"
 echo -e "\e[32m       Starting TomoShiriki Ralph Loop    \e[0m"
 echo -e "\e[32m==========================================\e[0m"
 echo -e "Max Iterations: $MAX_ITERATIONS"
-
-# Step 1: Detect if Docker is available and running
-USE_DOCKER=false
-if command -v docker &> /dev/null; then
-    docker ps &> /dev/null
-    if [ $? -eq 0 ]; then
-        USE_DOCKER=true
-    fi
-fi
+echo -e "Docker Sandbox: $USE_DOCKER"
 
 GIT_CONFIG_MOUNT=""
 if [ "$USE_DOCKER" = true ]; then
@@ -34,7 +44,7 @@ if [ "$USE_DOCKER" = true ]; then
         echo -e "Mounted host .gitconfig to container."
     fi
 else
-    echo -e "\e[33mDocker is not running/available. Falling back to native host execution.\e[0m"
+    echo -e "\e[33mRunning natively on WSL/Host environment.\e[0m"
 fi
 
 ITERATION=0
@@ -64,7 +74,15 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     if [ "$USE_DOCKER" = true ]; then
         docker run --rm -v "$(pwd):/workspace" -w /workspace $GIT_CONFIG_MOUNT tomoshiriki-dev agy -p --dangerously-skip-permissions "$Prompt"
     else
-        agy -p --dangerously-skip-permissions "$Prompt"
+        # WSL/Linux specific check: if keyring daemon and dbus are installed, wrap agy to enable authentication persistence
+        if command -v dbus-run-session &> /dev/null && command -v gnome-keyring-daemon &> /dev/null; then
+            dbus-run-session -- sh -c "
+              echo '' | gnome-keyring-daemon --unlock --components=secrets --daemonize &> /dev/null
+              agy -p --dangerously-skip-permissions \"$Prompt\"
+            "
+        else
+            agy -p --dangerously-skip-permissions "$Prompt"
+        fi
     fi
 
     # Auto-commit fallback
