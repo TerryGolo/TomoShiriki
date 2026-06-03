@@ -77,9 +77,14 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     Prompt="Read docs/PRD.md, docs/ralph_agent_instructions.md, and docs/tasks.md. Identify the next incomplete task, implement it, write unit tests in core/tests.py, verify tests pass, mark the task as complete in docs/tasks.md, commit the changes using git, and then exit."
 
     if [ "$USE_DOCKER" = true ]; then
-        # Run inside Docker with interactive pseudo-TTY (-it) to allow pasting the token if needed.
+        # Dynamically detect if we are running in an interactive terminal (TTY)
+        DOCKER_FLAGS="-i --rm"
+        if [ -t 0 ] && [ -t 1 ]; then
+            DOCKER_FLAGS="-it --rm"
+        fi
+
         # Mounts workspace and persisted keyring directories, then initializes and unlocks the keyring using dbus-launch.
-        docker run -it --rm \
+        docker run $DOCKER_FLAGS \
           -v "$(pwd):/workspace" \
           -v "$(pwd)/docs/.ralph_keyring:/home/vscode/.local/share/keyrings" \
           -w /workspace \
