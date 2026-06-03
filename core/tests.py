@@ -385,3 +385,78 @@ class BookingSignalsTest(TestCase):
             # Disconnect to clean up
             booking_created.disconnect(self.handle_created)
             booking_status_changed.disconnect(self.handle_status_changed)
+
+
+from django.core.management import call_command
+
+class SeederCommandTest(TestCase):
+    def test_seed_basic_scenario(self):
+        # Call command
+        call_command('seed_data', '--scenario', 'basic', '--clear')
+        
+        # Verify users created
+        self.assertTrue(User.objects.filter(username='alice').exists())
+        self.assertTrue(User.objects.filter(username='bob').exists())
+        self.assertTrue(User.objects.filter(username='charlie').exists())
+        
+        # Verify community created
+        self.assertTrue(Community.objects.filter(name="Greenwood Community Share").exists())
+        community = Community.objects.get(name="Greenwood Community Share")
+        self.assertEqual(community.members.count(), 3)
+        
+        # Verify resources created
+        self.assertEqual(Resource.objects.count(), 3)
+        self.assertTrue(Resource.objects.filter(name="Electric Lawnmower").exists())
+        
+        # Verify bookings created
+        self.assertEqual(Booking.objects.count(), 3)
+        self.assertEqual(Booking.objects.filter(status='PENDING').count(), 2)
+        self.assertEqual(Booking.objects.filter(status='APPROVED').count(), 1)
+
+    def test_seed_workflow_scenario(self):
+        call_command('seed_data', '--scenario', 'workflow', '--clear')
+        
+        # Verify bookings created in multiple statuses
+        self.assertEqual(Booking.objects.count(), 5)
+        self.assertTrue(Booking.objects.filter(status='PENDING').exists())
+        self.assertTrue(Booking.objects.filter(status='APPROVED').exists())
+        self.assertTrue(Booking.objects.filter(status='REJECTED').exists())
+        self.assertTrue(Booking.objects.filter(status='COMPLETED').exists())
+        self.assertTrue(Booking.objects.filter(status='CANCELLED').exists())
+
+    def test_seed_overlap_scenario(self):
+        call_command('seed_data', '--scenario', 'overlap', '--clear')
+        
+        # Verify overlap setup: 1 APPROVED, 1 CANCELLED, 1 REJECTED
+        self.assertEqual(Booking.objects.count(), 3)
+        mower = Resource.objects.get(name="Electric Lawnmower")
+        
+        approved_booking = Booking.objects.get(resource=mower, status='APPROVED')
+        cancelled_booking = Booking.objects.get(resource=mower, status='CANCELLED')
+        rejected_booking = Booking.objects.get(resource=mower, status='REJECTED')
+        
+        # Double check overlap exists in times
+        self.assertTrue(cancelled_booking.start_time < approved_booking.end_time)
+        self.assertTrue(cancelled_booking.end_time > approved_booking.start_time)
+
+    def test_clear_flag(self):
+        # Setup initial dummy data to check clearing
+        user = User.objects.create_user(username='dummy', password='password')
+        community = Community.objects.create(name='Dummy Community')
+        resource = Resource.objects.create(name='Dummy Resource', owner_user=user)
+        Booking.objects.create(
+            resource=resource,
+            borrower=user,
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(hours=1),
+            status='PENDING'
+        )
+        
+        # Run seeder with clear flag
+        call_command('seed_data', '--scenario', 'basic', '--clear')
+        
+        # Verify dummy data was deleted
+        self.assertFalse(User.objects.filter(username='dummy').exists())
+        self.assertFalse(Community.objects.filter(name='Dummy Community').exists())
+        self.assertFalse(Resource.objects.filter(name='Dummy Resource').exists())
+
